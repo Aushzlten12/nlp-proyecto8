@@ -1,0 +1,7 @@
+Artificial intelligence is transforming many industries.
+Language models like GPT-2 can autonomously generate coherent text.
+BM25 is an information retrieval algorithm based on term frequency.
+Information retrieval is key to search engines.
+GPT-2 was trained on a large corpus of internet text.
+Natural language processing enables machines to understand human language.
+Ranking algorithms determine the relevance of a document to a query.

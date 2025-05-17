@@ -1,24 +1,12 @@
-from sacrebleu import corpus_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from nltk.tokenize import word_tokenize
 
 
-def compute_bleu(predictions: list[str], references: list[str]) -> float:
-    """
-    Calcula BLEU con SacreBLEU.
-    """
-    refs = [[r] for r in references]
-    bleu = corpus_bleu(predictions, refs)
-    return bleu.score
-
-
-def manual_review(samples: list[tuple[str, str, str]]):
-    """
-    evaluación manual de fluidez.
-    """
-    for q, ref, pred in samples:
-        print("=== Consulta ===\n", q)
-        print("Referencia:\n", ref)
-        print("Generación:\n", pred)
-        print(
-            "\nPUNTUAR fluidez 1–5 según coherencia, gramática, naturalidad.\n"
-            + "-" * 40
+class Evaluator:
+    def compute_bleu(self, references: list, candidates: list) -> float:
+        tokenized_refs = [[word_tokenize(ref.lower())] for ref in references]
+        tokenized_cands = [word_tokenize(cand.lower()) for cand in candidates]
+        chencherry = SmoothingFunction()
+        return sentence_bleu(
+            tokenized_refs[0], tokenized_cands[0], smoothing_function=chencherry.method1
         )

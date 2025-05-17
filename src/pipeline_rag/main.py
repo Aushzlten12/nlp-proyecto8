@@ -1,49 +1,49 @@
-from preprocess_index import BM25Indexer
-from retriever import Retriever
-from generator import Generator
-from evaluator import compute_bleu, manual_review
+from preprocess_index import load_documents, preprocess_documents, build_bm25
+from retriever import BM25Retriever
+from generator import GPT2Generator
+from evaluator import Evaluator
+import csv
 
+# carga los documentos que son lineas de texto por ahora
+documents = load_documents("data/corpus.txt")
+preprocessed_docs = preprocess_documents(documents)
+bm25 = build_bm25(preprocessed_docs)
 
-def load_corpus(path: str) -> list[str]:
-    with open(path, encoding="utf-8") as f:
-        # Cada párrafo separado por línea en blanco como en el txt
-        return [p.strip() for p in f.read().split("\n\n") if p.strip()]
+# carga querys y references
+queries = load_documents("data/queries.txt")
+references = load_documents("data/references.txt")
 
+# diferentes top-k values
+top_k_values = [1, 2, 3, 5]
 
-def main():
+results = []
 
-    docs = load_corpus("data/wiki_paragraphs.txt")
-    indexer = BM25Indexer(docs)
-    bm25, docs = indexer.get_index()
+generator = GPT2Generator(max_tokens=50, temperature=0.7, top_p=0.8)
+evaluator = Evaluator()
 
-    # Instancia retriever y generator
-    retriever = Retriever(bm25, docs)
-    generator = Generator("gpt2")
+for query, reference in zip(queries, references):
+    print(f"\n=== Consulta: {query} ===")
+    for k in top_k_values:
+        print(f"\n--- Top-{k} Documentos ---")
+        retriever = BM25Retriever(bm25, documents, k)
+        top_docs = retriever.retrieve(query)
 
-    # prueba
-    examples = [
-        ("Who wrote the novel Dune?", "Frank Herbert"),
-        ("When did Columbus discover America?", "1492"),
-    ]
+        for i, doc in enumerate(top_docs):
+            print(f"[{i+1}] {doc}")
 
-    predictions, references, queries = [], [], []
-    for query, ref in examples:
-        topk = retriever.retrieve(query, k=5)
-        context = "\n\n".join(topk)
-        pred = generator.generate(context, query)
-        print(f">>> Query: {query}\n→ {pred}\n")
-        predictions.append(pred)
-        references.append(ref)
-        queries.append(query)
+        response = generator.generate(query, top_docs)
 
-    #  BLEU
-    bleu_score = compute_bleu(predictions, references)
-    print(f"BLEU score: {bleu_score:.2f}\n")
+        print("\n--- Respuesta Generada ---")
+        print(response)
 
-    # Evaluación de fluidez
-    manual_samples = list(zip(queries, references, predictions))
-    manual_review(manual_samples)
+        bleu_score = evaluator.compute_bleu([reference], [response])
+        print("\n--- Evaluación BLEU ---")
+        print(f"BLEU: {bleu_score:.4f}")
 
+        results.append([query, k, response, reference, bleu_score])
 
-if __name__ == "__main__":
-    main()
+# en CSV
+with open("data/results.csv", mode="w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["query", "top_k", "response", "reference", "bleu"])
+    writer.writerows(results)

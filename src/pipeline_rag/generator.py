@@ -1,21 +1,26 @@
-from transformers import GPT2Tokenizer, GPT2LMHeadModel
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
 
 
-class Generator:
-    def __init__(self, model_name: str = "gpt2"):
-        self.tokenizer = GPT2Tokenizer.from_pretrained(model_name)
-        self.model = GPT2LMHeadModel.from_pretrained(model_name)
+class GPT2Generator:
+    def __init__(self, max_tokens=50, temperature=0.7, top_p=0.8):
+        self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        self.model = GPT2LMHeadModel.from_pretrained("gpt2")
+        self.model.eval()
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.top_p = top_p
 
-    def generate(self, context: str, query: str, max_new_tokens: int = 50) -> str:
-        """Concatena contexto+pregunta y genera la respuesta."""
-        prompt = context + "\n\nQ: " + query + "\nA:"
-        inputs = self.tokenizer(prompt, return_tensors="pt")
-        out = self.model.generate(
-            **inputs,
-            max_length=inputs.input_ids.shape[1] + max_new_tokens,
-            num_beams=5,
-            no_repeat_ngram_size=2,
-            early_stopping=True
+    def generate(self, query: str, docs: list) -> str:
+        prompt = f"Context:\n- " + "\n- ".join(docs) + f"\nQuestion: {query}\nAnswer:"
+        inputs = self.tokenizer(
+            prompt, return_tensors="pt", truncation=True, max_length=512
         )
-        text = self.tokenizer.decode(out[0], skip_special_tokens=True)
-        return text.split("A:")[-1].strip()
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=self.max_tokens,
+                do_sample=False,
+                eos_token_id=self.tokenizer.eos_token_id,
+            )
+        return self.tokenizer.decode(outputs[0], skip_special_tokens=True).strip()

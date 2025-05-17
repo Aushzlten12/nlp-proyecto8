@@ -1,14 +1,14 @@
-from preprocess_index import preprocess
+from typing import List
+from nltk.tokenize import word_tokenize
+from rank_bm25 import BM25Okapi
 
 
-class Retriever:
-    def __init__(self, bm25, docs):
+class BM25Retriever:
+    def __init__(self, bm25: BM25Okapi, original_docs: List[str], k: int):
         self.bm25 = bm25
-        self.docs = docs
+        self.original_docs = original_docs
+        self.k = k
 
-    def retrieve(self, query: str, k: int = 5) -> list[str]:
-        """Devuelve los top-k documentos para la query."""
-        q_tokens = preprocess(query)
-        scores = self.bm25.get_scores(q_tokens)
-        topk_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
-        return [self.docs[i] for i in topk_idx]
+    def retrieve(self, query: str) -> List[str]:
+        tokenized_query = word_tokenize(query.lower())
+        return self.bm25.get_top_n(tokenized_query, self.original_docs, n=self.k)
