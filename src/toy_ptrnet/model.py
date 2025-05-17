@@ -3,70 +3,41 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class PointerNetwork(nn.Module):
-    """
-    Pointer Network toy para sumar subconjuntos.
-    Conditioned on S (suma objetivo).
-    """
-
-    def __init__(
-        self,
-        seq_len: int,
-        vocab_size: int,
-        embed_dim: int,
-        hidden_dim: int,
-        dropout: float = 0.1,
-    ):
+class AutoregressivePointerNet(nn.Module):
+    def __init__(self, input_dim=1, hidden_dim=128):
         super().__init__()
+        self.encoder = nn.LSTM(input_dim, hidden_dim, batch_first=True)
+        self.decoder_cell = nn.LSTMCell(input_dim, hidden_dim)
+        self.W1 = nn.Linear(hidden_dim, hidden_dim)
+        self.W2 = nn.Linear(hidden_dim, hidden_dim)
+        self.vt = nn.Linear(hidden_dim, 1)
 
-        self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.dropout = nn.Dropout(dropout)
-        # Encoder bidireccional
-        self.encoder = nn.LSTM(
-            embed_dim, hidden_dim, batch_first=True, bidirectional=True
-        )
-        # Inicializar decoder
-        self.init_linear = nn.Linear(hidden_dim * 2, hidden_dim)
+    def forward(self, x, target_len):
+        batch_size, seq_len, _ = x.size()
+        enc_out, (h, c) = self.encoder(x)
+        mask = torch.zeros(batch_size, seq_len, device=x.device)
+        pointers, log_probs = [], []
 
-        self.decoder_cell = nn.LSTMCell(embed_dim, hidden_dim)
+        # entrada inicial al decoder: vector cero
+        dec_input = torch.zeros(batch_size, x.size(-1), device=x.device)
+        hx, cx = h[0], c[0]
 
-        # Atención (pointer)
-        self.W1 = nn.Linear(hidden_dim * 2, hidden_dim, bias=False)
-        self.W2 = nn.Linear(hidden_dim, hidden_dim, bias=False)
-        self.v = nn.Linear(hidden_dim, 1, bias=False)
+        for _ in range(target_len):
+            hx, cx = self.decoder_cell(dec_input, (hx, cx))
 
-        # Proyección de la suma
-        self.sum_proj = nn.Linear(1, embed_dim)
+            query = self.W2(hx).unsqueeze(1)
+            keys = self.W1(enc_out)
+            scores = self.vt(torch.tanh(keys + query)).squeeze(-1)
+            scores = scores.masked_fill(mask.bool(), float("-inf"))
+            log_prob = F.log_softmax(scores, dim=1)
 
-    def forward(self, x: torch.LongTensor, S: torch.LongTensor, max_output_len: int):
+            idx = log_prob.argmax(dim=1)
+            pointers.append(idx)
+            log_probs.append(log_prob[torch.arange(batch_size), idx])
 
-        B, seq_len = x.size()
-        # Encode
-        emb = self.embedding(x)
-        emb = self.dropout(emb)
-        enc_out, (h_n, c_n) = self.encoder(emb)
-        enc_out = self.dropout(enc_out)
-        # Init decoder
-        h0 = torch.cat([h_n[-2], h_n[-1]], dim=1)
-        c0 = torch.cat([c_n[-2], c_n[-1]], dim=1)
-        h = self.init_linear(h0)
-        c = self.init_linear(c0)
-        # sum embedding
-        s_emb = self.sum_proj(S.unsqueeze(-1).float())
-        inp = self.dropout(s_emb)
-        # Decode steps
-        ptr_dists = []
-        for _ in range(max_output_len):
-            h, c = self.decoder_cell(inp, (h, c))
-            # Atención como puntero
-            w1 = self.W1(enc_out)
-            w2 = self.W2(h).unsqueeze(1)
-            u = self.v(torch.tanh(w1 + w2)).squeeze(-1)
-            a = F.softmax(u, dim=1)
-            ptr_dists.append(a)
-            # embed pointed element
-            idx = a.argmax(dim=1)
-            inp = emb.gather(1, idx.view(B, 1, 1).expand(-1, -1, emb.size(2)))
-            inp = inp.squeeze(1)
-            inp = self.dropout(inp)
-        return torch.stack(ptr_dists, dim=1)
+            mask.scatter_(1, idx.unsqueeze(1), 1)
+            dec_input = x[torch.arange(batch_size), idx]
+
+        pointers = torch.stack(pointers, dim=1)
+        log_probs = torch.stack(log_probs, dim=1)
+        return pointers, log_probs
